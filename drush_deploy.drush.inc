@@ -22,10 +22,9 @@ function drush_deploy_drush_command() {
   $items = array();
 
   $items['drush-deploy'] = array(
-    'description' => "Update an instance of a Drupal project via drush",
-    'callback arguments' => array(array(), FALSE),
+    'description' => 'Update an instance of a Drupal project via drush',
     'options' => array(
-      '--deploy-host' => 'The hostname of the site to deploy to',
+      '--deploy-method' => 'Command used to update the source code. Example: gittyup for git pulls.',
     ),
     'aliases' => array('deploy'),
   );
@@ -38,21 +37,19 @@ function drush_deploy_drush_command() {
  */
 function drush_drush_deploy() {
 	// Set site offline
-  drush_variable_set('site_offline', 1);
-  	
+  drush_invoke('variable_set', 'site_offline', 1);
+	  	
 	// Update source code
-  if (drush_get_option('git-branch') || 
-      drush_get_option('git-tag') || 
-      (drush_get_option('deploy-method') == 'git')) {
-		drush_gittyup();
+  if ($deploy_method = drush_get_option('deploy-method')) {
+		drush_invoke($deploy_method);
   }
   
 	// Update database
-	drush_core_updatedb();
+	drush_invoke('updatedb');
   
-	// Revert features
+	// Revert features if available
 	if (function_exists('drush_features_revert_all')) {
-  	drush_features_revert_all();
+  	drush_invoke('features_revert_all');
   	
   	// Detect and list features still in non-default state
   	// @see drush_features_list()
@@ -98,10 +95,11 @@ function drush_drush_deploy() {
 	}
 	  	
 	// Clear cache
-	drupal_flush_all_caches();
+	drush_invoke('cache_clear', 'all');
 	
-	// TODO: Hit the frontpage while site is offline to warm caches and avoid stampede
+	// TODO: Hit the frontpage as admin user while site is offline 
+	// to warm caches and avoid stampede.
 	
 	// Set site online
-	drush_variable_set('site_offline', 0);
+	drush_invoke('variable_set', 'site_offline', 0);
 }
