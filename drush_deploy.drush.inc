@@ -23,9 +23,6 @@ function drush_deploy_drush_command() {
 
   $items['drush-deploy'] = array(
     'description' => 'Update an instance of a Drupal project via drush',
-    'options' => array(
-      '--deploy-method' => 'Command used to update the source code. Example: gittyup for git pulls.',
-    ),
     'aliases' => array('deploy'),
   );
 
@@ -36,70 +33,61 @@ function drush_deploy_drush_command() {
  * Command callback for drush deploy.
  */
 function drush_drush_deploy() {
-	// Set site offline
-  drush_invoke('variable_set', 'site_offline', 1);
-	  	
-	// Update source code
-  if ($deploy_method = drush_get_option('deploy-method')) {
-		drush_invoke($deploy_method);
+  $commands = (drush_get_option('deploy-commands', drush_deploy_default_commands()));
+  foreach ($commands as $i => $command) {
+    //Determine drush command and arguments
+    $args = array(); //defaults to no args
+    if (is_array($command)) {
+    	//FIXME: Is there a simpler way of extracting first key-value pair from an array?
+    	foreach ($command as $command => $args) {
+    		break;
+    	}
+    }
+    
+    //Execute command
+    $success = call_user_func_array('drush_invoke', array_merge(array($command), $args));
+
+    //Exit in case of emergency!
+    if (!$success) {
+    	//TODO: Consider if rollback of already executed commands is possible
+    	break;
+    }
+  }
+}
+
+/**
+ * Assemble a set of sensible default deploy commands when using features and git.
+ */
+function drush_deploy_default_commands() {
+  $default_commands = array();
+  
+  //Set site offline
+  $default_commands[] = array('variable_set' => array('site_offline', 1));
+  
+  //If git branch or tag has been defined we probably want to use
+  //gittyup for updating the source code
+  if (drush_get_option('git-branch') || 
+      drush_get_option('git-tag')) {
+    $default_commands[] = 'gittyup';
   }
   
-	// Update database
-	drush_invoke('updatedb');
+  //Perform database updates
+  $default_commands[] = 'updatedb';
   
-	// Revert features if available
-	if (function_exists('drush_features_revert_all')) {
-  	drush_invoke('features_revert_all');
-  	
-  	// Detect and list features still in non-default state
-  	// @see drush_features_list()
-  	module_load_include('inc', 'features', 'features.export');
-  	$rows = array();
-	  foreach (features_get_features(NULL, TRUE) as $k => $m) {
-	    switch (features_get_storage($m->name)) {
-	      case FEATURES_DEFAULT:
-	      case FEATURES_REBUILDABLE:
-	        $storage = '';
-	        break;
-	      case FEATURES_OVERRIDDEN:
-	        $storage = dt('Overridden');
-	        break;
-	      case FEATURES_NEEDS_REVIEW:
-	        $storage = dt('Needs review');
-	        break;
-	    }
-	    if ($storage != '') {
-		    $rows[] = array(
-		      $m->info['name'],
-		      $m->name,
-		      $m->status ? dt('Enabled') : dt('Disabled'),
-		      $storage
-		    );
-	    }
-	  }
+  //Only revert features if used
+  if (function_exists(drush_features_revert_all)) {
+    $default_commands[] = 'features_revert_all';
+    $default_commands[] = 'features_list';
+  }
+  
+  //Make sure we have a clean cache
+  $default_commands[] = array('cache_clear' => array('all'));
+  
+  // TODO: Hit the frontpage as admin user while site is offline 
+  // to warm caches and avoid stampede.
+  
+  //Set site online again
+  $default_commands[] = array('variable_set' => array('site_offline', 0));
 
-	  if (sizeof($rows) > 0) {
-	  	drush_log(dt('Unable to revert the following features to default state:'), 'warning');
-
-	  	array_unshift($rows, array(array(dt('Name'), dt('Feature'), dt('Status'), dt('State'))));
-      drush_print_table($rows, TRUE);
-      
-      // Display features diff for overridden modules if available
-      if (module_exists('diff')) {
-      	foreach ($rows as $row) {
-      		drush_log(dt('Diff for module %module', array('%module' => $row[0])));
-      		drush_features_diff($row[0]);
-      	}
-      }
-	  }
-	}
-	  	
-	// Clear cache
-	drush_invoke('cache_clear', 'all');
-	
-	// TODO: Hit the frontpage as admin user while site is offline 
-	// to warm caches and avoid stampede.
-	
-	// Set site online
-	drush_invoke('variable_set', 'site_offline', 0);
+  return $default_commands;
 }
